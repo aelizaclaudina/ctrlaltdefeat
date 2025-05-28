@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Southeastern Relay - No Backend Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      background: #f7f7f7;
+    }
+    h1 {
+      color: #2a2a2a;
+    }
+    form, .section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      margin-top: 15px;
+      padding: 10px 16px;
+      background-color: #00458b;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0060c0;
+    }
+    .log {
+      background: #e8f0ff;
+      margin-top: 10px;
+      padding: 10px;
+      border-left: 4px solid #00458b;
+    }
+    #qrCode {
+      margin-top: 20px;
+      text-align: center;
+    }
+    #backBtn {
+      background-color: #c0392b;
+    }
+    #backBtn:hover {
+      background-color: #e74c3c;
+    }
+    #loggedInUser {
+      margin-bottom: 15px;
+      font-weight: bold;
+      font-size: 1.1em;
+      color: #00458b;
+    }
+    #clearAllDataBtn {
+      background-color: #c0392b;
+      width: 100%;
+    }
+    #clearAllDataBtn:hover {
+      background-color: #e74c3c;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Southeastern Relay</h1>
+  <div id="loggedInUser"></div>
+
+  <!-- LOGIN -->
+  <form id="loginForm">
+    <h2>Login</h2>
+    <label>Username:</label>
+    <input type="text" id="username" required />
+    <label>Password:</label>
+    <input type="password" id="password" required />
+    <button type="submit">Login</button>
+  </form>
+
+  <!-- BACK / LOGOUT BUTTON -->
+  <button id="backBtn" style="display:none;">Back / Logout</button>
+
+  <!-- QR Code Display -->
+  <div id="qrCode" style="display:none;">
+    <h3>Your Login Token QR Code</h3>
+    <canvas id="qrCanvas"></canvas>
+  </div>
+
+  <!-- LOG ENTRY -->
+  <form id="logForm" style="display:none;">
+    <h2>Submit Log Entry</h2>
+    <label>Train ID:</label>
+    <input type="text" id="trainId" />
+    <label>Unit ID:</label>
+    <input type="text" id="unitId" />
+    <label>Type:</label>
+    <select id="type">
+      <option value="delay">Delay</option>
+      <option value="fault">Fault</option>
+      <option value="vip">VIP Passenger</option>
+      <option value="ticket">Ticket Checked</option>
+      <option value="note">Note</option>
+    </select>
+    <label>Message:</label>
+    <textarea id="message"></textarea>
+    <button type="submit">Submit Log</button>
+  </form>
+
+  <!-- VIEW LOGS -->
+  <div class="section" id="logsSection" style="display:none;">
+    <h2>View Logs</h2>
+    <input type="text" id="viewTrainId" placeholder="Enter Train ID" />
+    <button id="loadLogsBtn">Load Logs</button>
+    <div id="logs"></div>
+  </div>
+
+  <!-- PASSENGER NEEDS -->
+  <form id="passengerNeedsForm" style="display:none;">
+    <h2>Submit Passenger Needs</h2>
+    <label>Train ID:</label>
+    <input type="text" id="pnTrainId" />
+    <label>Need Type:</label>
+    <select id="pnType">
+      <option value="Assistance Requests">Assistance Requests</option>
+      <option value="Special Accommodation">Special Accommodation</option>
+      <option value="Accessibility Requirements">Accessibility Requirements</option>
+    </select>
+    <button type="submit">Submit needs</button>
+  </form>
+
+  <!-- PASSENGER NEEDS VIEWING SECTION -->
+  <div class="section" id="PassengerNeedsSection" style="display:none;">
+    <h2>View Needs</h2>
+    <button id="loadNeedsBtn">Load Needs</button>
+    <div id="passengerNeedsDisplay"></div>
+  </div>
+
+  <!-- HANDOVER FORM -->
+  <form id="handoverForm" style="display:none;">
+    <h2>Submit Handover</h2>
+    <label>Train ID:</label>
+    <input type="text" id="handoverTrainId" />
+    <label>Summary:</label>
+    <textarea id="handoverSummary"></textarea>
+    <label>Submitted By:</label>
+    <input type="text" id="submittedBy" readonly />
+    <button type="submit">Send Handover</button>
+  </form>
+
+  <!-- HANDOVER VIEWING SECTION -->
+  <div class="section" id="handoversSection" style="display:none;">
+    <h2>View Handovers</h2>
+    <button id="loadHandoversBtn">Load Handovers</button>
+    <div id="handovers"></div>
+  </div>
+
+   <!-- CLEAR ALL DATA BUTTON -->
+  <div class="section" style="margin-top:10px;">
+    <button id="clearAllDataBtn" style="display:none;">Clear All Data</button>
+  </div>
+
+  <!-- QR code lib from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+
+  <script>
+    // Logs stored in-memory (per session)
+    const logsDB = {};
+
+    // Handovers stored in localStorage for sharing between tabs/users
+    let handoversDB = JSON.parse(localStorage.getItem("handoversDB") || "[]");
+
+    // Passenger needs stored in-memory
+    const passengerNeedsDB = {};
+
+    // Save handovers back to localStorage
+    function saveHandovers() {
+      localStorage.setItem("handoversDB", JSON.stringify(handoversDB));
+    }
+
+    let token = "";
+    let loggedInUsername = "";
+
+    const loginForm = document.getElementById("loginForm");
+    const logForm = document.getElementById("logForm");
+    const logsSection = document.getElementById("logsSection");
+    const handoverForm = document.getElementById("handoverForm");
+    const qrCodeDiv = document.getElementById("qrCode");
+    const backBtn = document.getElementById("backBtn");
+    const handoversSection = document.getElementById("handoversSection");
+    const loadHandoversBtn = document.getElementById("loadHandoversBtn");
+    const handoversDiv = document.getElementById("handovers");
+    const passengerNeedsForm = document.getElementById("passengerNeedsForm");
+    const loggedInUserDiv = document.getElementById("loggedInUser");
+    const clearAllDataBtn = document.getElementById("clearAllDataBtn");
+
+    loginForm.addEventListener("submit", e => {
+      e.preventDefault();
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value.trim();
+
+      if (!username || !password) {
+        alert("Please enter username and password.");
+        return;
+      }
+
+      token = `token-for-${username}-${Date.now()}`;
+      loggedInUsername = username;
+
+      loginForm.style.display = "none";
+      logForm.style.display = "block";
+      logsSection.style.display = "block";
+      handoverForm.style.display = "block";
+      qrCodeDiv.style.display = "block";
+      backBtn.style.display = "inline-block";
+      handoversSection.style.display = "block";
+      passengerNeedsForm.style.display = "block";
+      document.getElementById("PassengerNeedsSection").style.display = "block";
+
+      clearAllDataBtn.style.display = "block";
+
+      loggedInUserDiv.textContent = `Logged in as: ${loggedInUsername}`;
+      document.getElementById("submittedBy").value = loggedInUsername;
+
+      QRCode.toCanvas(document.getElementById("qrCanvas"), token, { width: 180 }, err => {
+        if (err) console.error(err);
+      });
+
+      alert(`Logged in as ${username}`);
+    });
+
+    backBtn.addEventListener("click", () => {
+      token = "";
+      loggedInUsername = "";
+
+      loginForm.style.display = "block";
+      logForm.style.display = "none";
+      logsSection.style.display = "none";
+      handoverForm.style.display = "none";
+      qrCodeDiv.style.display = "none";
+      backBtn.style.display = "none";
+      handoversSection.style.display = "none";
+      passengerNeedsForm.style.display = "none";
+      document.getElementById("PassengerNeedsSection").style.display = "none";
+
+      clearAllDataBtn.style.display = "none";
+
+      loggedInUserDiv.textContent = "";
+      document.getElementById("submittedBy").value = "";
+
+      loginForm.reset();
+      logForm.reset();
+      handoverForm.reset();
+      passengerNeedsForm.reset();
+      document.getElementById("viewTrainId").value = "";
+      document.getElementById("logs").innerHTML = "";
+      handoversDiv.innerHTML = "";
+      document.getElementById("passengerNeedsDisplay").innerHTML = "";
+
+      alert("Logged out.");
+    });
+
+    // Submit log entry
+    logForm.addEventListener("submit", e => {
+      e.preventDefault();
+      if (!token) return alert("You must be logged in.");
+
+      const trainId = document.getElementById("trainId").value.trim();
+      const unitId = document.getElementById("unitId").value.trim();
+      const type = document.getElementById("type").value;
+      const message = document.getElementById("message").value.trim();
+
+      if (!trainId || !message) {
+        alert("Train ID and Message are required.");
+        return;
+      }
+
+      if (!logsDB[trainId]) logsDB[trainId] = [];
+
+      logsDB[trainId].push({
+        type,
+        message,
+        unit_id: unitId,
+        submitted_by: loggedInUsername,
+        timestamp: new Date().toISOString(),
+      });
+
+      alert("Log submitted.");
+      e.target.reset();
+    });
+
+    // Handle passenger needs form submission
+    passengerNeedsForm.addEventListener("submit", e => {
+      e.preventDefault();
+      if (!token) return alert("You must be logged in.");
+
+      const trainId = document.getElementById("pnTrainId").value.trim();
+      const needType = document.getElementById("pnType").value;
+
+      if (!trainId) {
+        alert("Please enter a Train ID.");
+        return;
+      }
+
+      if (!passengerNeedsDB[trainId]) passengerNeedsDB[trainId] = [];
+
+      passengerNeedsDB[trainId].push({
+        type: needType,
+        submitted_by: loggedInUsername,
+        timestamp: new Date().toISOString(),
+      });
+
+      alert(`Passenger need submitted for Train ID: ${trainId}\nNeed Type: ${needType}`);
+
+      e.target.reset();
+    });
+
+    // Load passenger needs on button click
+    document.getElementById("loadNeedsBtn").addEventListener("click", () => {
+      if (!token) return alert("You must be logged in.");
+
+      const displayDiv = document.getElementById("passengerNeedsDisplay");
+      displayDiv.innerHTML = "";
+
+      let hasNeeds = false;
+      for (const trainId in passengerNeedsDB) {
+        if (passengerNeedsDB.hasOwnProperty(trainId)) {
+          hasNeeds = true;
+          const trainSection = document.createElement("div");
+          trainSection.innerHTML = `<h3>Train ID: ${trainId}</h3>`;
+
+          passengerNeedsDB[trainId].forEach(need => {
+            const needDiv = document.createElement("div");
+            needDiv.className = "log";
+            needDiv.innerHTML = `
+              <strong>${need.type}</strong><br>
+              <small>Submitted by: ${need.submitted_by} at ${new Date(need.timestamp).toLocaleString()}</small>
+            `;
+            trainSection.appendChild(needDiv);
+          });
+
+          displayDiv.appendChild(trainSection);
+        }
+      }
+
+      if (!hasNeeds) {
+        displayDiv.innerHTML = "<em>No passenger needs submitted yet.</em>";
+      }
+    });
+
+    // Load logs
+    document.getElementById("loadLogsBtn").addEventListener("click", () => {
+      if (!token) return alert("You must be logged in.");
+
+      const trainId = document.getElementById("viewTrainId").value.trim();
+      if (!trainId) {
+        alert("Enter a Train ID.");
+        return;
+      }
+
+      const logs = logsDB[trainId] || [];
+      const logDiv = document.getElementById("logs");
+      logDiv.innerHTML = "";
+
+      if (logs.length === 0) {
+        logDiv.innerHTML = "<em>No logs found for this train.</em>";
+        return;
+      }
+
+      logs.forEach(log => {
+        const entry = document.createElement("div");
+        entry.className = "log";
+        entry.innerHTML = `<strong>[${log.type}]</strong> ${log.message} <br>
+          <small>By: ${log.submitted_by || "Unknown"} at ${new Date(log.timestamp).toLocaleString()}</small>`;
+        logDiv.appendChild(entry);
+      });
+    });
+
+    // Submit handover
+    handoverForm.addEventListener("submit", e => {
+      e.preventDefault();
+      if (!token) return alert("You must be logged in.");
+
+      const trainId = document.getElementById("handoverTrainId").value.trim();
+      const summary = document.getElementById("handoverSummary").value.trim();
+      const submittedBy = loggedInUsername;
+
+      if (!trainId || !summary || !submittedBy) {
+        alert("Please fill all handover fields.");
+        return;
+      }
+
+      const newHandover = {
+        train_id: trainId,
+        summary,
+        submitted_by: submittedBy,
+        timestamp: new Date().toISOString(),
+      };
+
+      handoversDB.push(newHandover);
+      saveHandovers();
+
+      alert("Handover submitted.");
+      e.target.reset();
+
+      loadHandoversBtn.click();
+    });
+
+    // Load handovers
+    loadHandoversBtn.addEventListener("click", () => {
+      if (!token) return alert("You must be logged in.");
+
+      handoversDiv.innerHTML = "";
+      if (handoversDB.length === 0) {
+        handoversDiv.innerHTML = "<em>No handovers submitted yet.</em>";
+        return;
+      }
+
+      handoversDB.forEach(h => {
+        const div = document.createElement("div");
+        div.className = "log";
+        div.innerHTML = `<strong>Train ID: ${h.train_id}</strong><br>
+          ${h.summary}<br>
+          <small>Submitted by: ${h.submitted_by} at ${new Date(h.timestamp).toLocaleString()}</small>`;
+        handoversDiv.appendChild(div);
+      });
+    });
+
+    // CLEAR ALL DATA BUTTON FUNCTIONALITY
+    clearAllDataBtn.addEventListener("click", () => {
+      if (!token) return alert("You must be logged in.");
+
+      if (!confirm("Are you sure you want to clear ALL stored data? This cannot be undone.")) return;
+
+      // Clear in-memory data
+      for (const key in logsDB) delete logsDB[key];
+      for (const key in passengerNeedsDB) delete passengerNeedsDB[key];
+
+      // Clear localStorage handovers
+      handoversDB = [];
+      saveHandovers();
+
+      // Clear UI
+      document.getElementById("logs").innerHTML = "";
+      document.getElementById("passengerNeedsDisplay").innerHTML = "";
+      handoversDiv.innerHTML = "";
+
+      // Reset all forms and inputs
+      logForm.reset();
+      passengerNeedsForm.reset();
+      handoverForm.reset();
+      document.getElementById("viewTrainId").value = "";
+      document.getElementById("pnTrainId").value = "";
+      document.getElementById("handoverTrainId").value = "";
+      document.getElementById("handoverSummary").value = "";
+
+      alert("All stored data cleared.");
+    });
+  </script>
+</body>
+</html>
+
+
